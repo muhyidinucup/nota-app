@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
+import { toPng } from "html-to-image";
 import { createInvoice } from "@/app/actions/invoice";
 
 export default function CashierPage() {
@@ -12,7 +13,10 @@ export default function CashierPage() {
     { itemName: "", quantity: 1, unitPrice: 0 },
   ]);
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [invoiceResult, setInvoiceResult] = useState<any>(null);
+
+  const receiptRef = useRef<HTMLDivElement>(null);
 
   const addItemRow = () => {
     setItems([...items, { itemName: "", quantity: 1, unitPrice: 0 }]);
@@ -56,11 +60,48 @@ export default function CashierPage() {
     setLoading(false);
   };
 
+  const handleDownloadImage = async () => {
+    if (!receiptRef.current) return;
+    setDownloading(true);
+
+    try {
+      const dataUrl = await toPng(receiptRef.current, {
+        cacheBust: true,
+        backgroundColor: "#ffffff",
+        pixelRatio: 2,
+      });
+
+      // Fitur Web Share API untuk perangkat mobile (langsung kirim via WA / simpan ke Galeri)
+      const blob = await (await fetch(dataUrl)).blob();
+      const file = new File([blob], `${invoiceResult.invoiceNumber}.png`, {
+        type: "image/png",
+      });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Nota ${invoiceResult.invoiceNumber}`,
+          text: `Nota transaksi dari ${invoiceResult.store.name}`,
+        });
+      } else {
+        const link = document.createElement("a");
+        link.download = `${invoiceResult.invoiceNumber}.png`;
+        link.href = dataUrl;
+        link.click();
+      }
+    } catch (err) {
+      console.error("Gagal membuat gambar nota:", err);
+      alert("Gagal menyimpan gambar nota.");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
-    <main className="min-h-screen bg-neutral-100 p-6 text-neutral-900">
+    <main className="min-h-screen bg-neutral-100 p-4 sm:p-6 text-neutral-900">
       <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6 print:block">
-        {/* Form Kasir (Sembunyi saat cetak) */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-neutral-300 print:hidden text-neutral-900">
+        {/* Form Kasir */}
+        <div className="bg-white p-5 sm:p-6 rounded-xl shadow-sm border border-neutral-300 print:hidden text-neutral-900">
           <div className="flex justify-between items-center mb-4">
             <h1 className="text-xl font-bold text-neutral-900">Aplikasi Nota Penjualan</h1>
             <Link
@@ -98,9 +139,9 @@ export default function CashierPage() {
                 value={paymentMethod}
                 onChange={(e) => setPaymentMethod(e.target.value)}
               >
-                <option value="CASH" className="text-neutral-900">Cash / Tunai</option>
-                <option value="QRIS" className="text-neutral-900">QRIS</option>
-                <option value="TRANSFER" className="text-neutral-900">Transfer Bank</option>
+                <option value="CASH">Cash / Tunai</option>
+                <option value="QRIS">QRIS</option>
+                <option value="TRANSFER">Transfer Bank</option>
               </select>
             </div>
           </div>
@@ -111,7 +152,7 @@ export default function CashierPage() {
               <button
                 type="button"
                 onClick={addItemRow}
-                className="text-xs bg-neutral-900 hover:bg-neutral-800 text-white font-medium px-2.5 py-1 rounded"
+                className="text-xs bg-neutral-900 hover:bg-black text-white font-medium px-2.5 py-1 rounded transition"
               >
                 + Tambah Item
               </button>
@@ -166,66 +207,82 @@ export default function CashierPage() {
           </button>
         </div>
 
-        {/* Lembar Nota / Tampilan Cetak */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-neutral-300 print:border-none print:shadow-none font-mono text-neutral-900">
+        {/* Kolom Lembar Nota */}
+        <div className="bg-white p-5 sm:p-6 rounded-xl shadow-sm border border-neutral-300 print:border-none print:shadow-none flex flex-col justify-between">
           {invoiceResult ? (
             <div>
-              <div className="text-center border-b border-neutral-300 pb-4 mb-4">
-                <h2 className="font-bold text-lg text-neutral-900">{invoiceResult.store.name}</h2>
-                <p className="text-xs text-neutral-600">{invoiceResult.store.address}</p>
-                <p className="text-xs text-neutral-600">{invoiceResult.store.phone}</p>
-              </div>
-
-              <div className="text-xs space-y-1 mb-4 text-neutral-700">
-                <div className="flex justify-between">
-                  <span>No: {invoiceResult.invoiceNumber}</span>
-                  <span>{new Date(invoiceResult.createdAt).toLocaleDateString("id-ID")}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Pelanggan: {invoiceResult.customerName || "-"}</span>
-                  <span>Bayar: {invoiceResult.paymentMethod}</span>
-                </div>
-              </div>
-
-              <table className="w-full text-xs mb-4 text-neutral-900">
-                <thead>
-                  <tr className="border-b border-neutral-300 text-left font-bold">
-                    <th className="py-1">Item</th>
-                    <th className="py-1 text-center">Qty</th>
-                    <th className="py-1 text-right">Harga</th>
-                    <th className="py-1 text-right">Subtotal</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoiceResult.items.map((item: any) => (
-                    <tr key={item.id} className="border-b border-neutral-200">
-                      <td className="py-1">{item.itemName}</td>
-                      <td className="py-1 text-center">{item.quantity}</td>
-                      <td className="py-1 text-right">{item.unitPrice.toLocaleString("id-ID")}</td>
-                      <td className="py-1 text-right">{item.subtotal.toLocaleString("id-ID")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <div className="flex justify-between font-bold text-sm border-t border-neutral-300 pt-2 mb-6 text-neutral-900">
-                <span>TOTAL</span>
-                <span>Rp {invoiceResult.totalAmount.toLocaleString("id-ID")}</span>
-              </div>
-
-              <div className="text-center text-xs text-neutral-500 mb-6">
-                Terima kasih atas kunjungan Anda!
-              </div>
-
-              <button
-                onClick={() => window.print()}
-                className="w-full bg-neutral-900 hover:bg-black text-white py-2 rounded text-sm font-sans font-medium print:hidden"
+              {/* Area Struk yang Dikonversi ke Gambar */}
+              <div
+                ref={receiptRef}
+                className="bg-white p-4 font-mono text-neutral-900 border border-neutral-200 rounded-lg"
               >
-                Cetak Nota (Print / PDF)
-              </button>
+                <div className="text-center border-b border-neutral-300 pb-3 mb-3">
+                  <h2 className="font-bold text-base text-neutral-900">{invoiceResult.store.name}</h2>
+                  <p className="text-xs text-neutral-600">{invoiceResult.store.address}</p>
+                  <p className="text-xs text-neutral-600">{invoiceResult.store.phone}</p>
+                </div>
+
+                <div className="text-xs space-y-1 mb-3 text-neutral-700">
+                  <div className="flex justify-between">
+                    <span>No: {invoiceResult.invoiceNumber}</span>
+                    <span>{new Date(invoiceResult.createdAt).toLocaleDateString("id-ID")}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Pelanggan: {invoiceResult.customerName || "-"}</span>
+                    <span>Bayar: {invoiceResult.paymentMethod}</span>
+                  </div>
+                </div>
+
+                <table className="w-full text-xs mb-3 text-neutral-900">
+                  <thead>
+                    <tr className="border-b border-neutral-300 text-left font-bold">
+                      <th className="py-1">Item</th>
+                      <th className="py-1 text-center">Qty</th>
+                      <th className="py-1 text-right">Harga</th>
+                      <th className="py-1 text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invoiceResult.items.map((item: any) => (
+                      <tr key={item.id} className="border-b border-neutral-100">
+                        <td className="py-1">{item.itemName}</td>
+                        <td className="py-1 text-center">{item.quantity}</td>
+                        <td className="py-1 text-right">{item.unitPrice.toLocaleString("id-ID")}</td>
+                        <td className="py-1 text-right">{item.subtotal.toLocaleString("id-ID")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <div className="flex justify-between font-bold text-sm border-t border-neutral-300 pt-2 mb-3 text-neutral-900">
+                  <span>TOTAL</span>
+                  <span>Rp {invoiceResult.totalAmount.toLocaleString("id-ID")}</span>
+                </div>
+
+                <div className="text-center text-xs text-neutral-500">
+                  Terima kasih atas kunjungan Anda!
+                </div>
+              </div>
+
+              {/* Tombol Aksi */}
+              <div className="mt-4 space-y-2 print:hidden">
+                <button
+                  onClick={handleDownloadImage}
+                  disabled={downloading}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-sm font-semibold transition flex items-center justify-center gap-2"
+                >
+                  {downloading ? "Memproses..." : "Simpan Gambar / Kirim WA"}
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="w-full bg-neutral-900 hover:bg-black text-white py-2 rounded-lg text-xs font-medium transition"
+                >
+                  Cetak Nota (Print / PDF)
+                </button>
+              </div>
             </div>
           ) : (
-            <div className="h-full flex items-center justify-center text-neutral-500 text-xs text-center">
+            <div className="h-48 md:h-full flex items-center justify-center text-neutral-500 text-xs text-center font-mono">
               Nota akan otomatis muncul di sini setelah Anda menekan tombol "Simpan & Buat Nota".
             </div>
           )}
